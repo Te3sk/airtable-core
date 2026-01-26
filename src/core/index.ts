@@ -1,2 +1,2 @@
 // Public exports for @scope/airtable/core
-export {};
+export * from "./types/airtable";

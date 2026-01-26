@@ -4,6 +4,7 @@
  * These types intentionally avoid opinionated field modeling.
  * Consumers can define their own `TFields` shapes per table.
  */
+
 /**
  * @name AirtableRecordId
  * @kind Type
@@ -50,7 +51,8 @@
  *
  * @see AirtableRecord
  */
-type AirtableRecordId = string;
+export type AirtableRecordId = string;
+
 /**
  * @name AirtableCreatedTime
  * @kind Type
@@ -97,7 +99,8 @@ type AirtableRecordId = string;
  *
  * @see AirtableRecord
  */
-type AirtableCreatedTime = string;
+export type AirtableCreatedTime = string; // ISO string
+
 /**
  * @name AirtableOffset
  * @kind Type
@@ -145,7 +148,8 @@ type AirtableCreatedTime = string;
  * @see AirtableListResponse
  * @see AirtableListParams
  */
-type AirtableOffset = string;
+export type AirtableOffset = string;
+
 /**
  * @name AirtableFields
  * @kind Type
@@ -195,7 +199,8 @@ type AirtableOffset = string;
  *
  * @see AirtableRecord
  */
-type AirtableFields = Record<string, unknown>;
+export type AirtableFields = Record<string, unknown>;
+
 /**
  * @name AirtableRecord
  * @kind Type
@@ -262,11 +267,12 @@ type AirtableFields = Record<string, unknown>;
  * @see AirtableCreatedTime
  * @see AirtableFields
  */
-type AirtableRecord<TFields extends AirtableFields = AirtableFields> = {
-    id: AirtableRecordId;
-    createdTime?: AirtableCreatedTime;
-    fields: TFields;
+export type AirtableRecord<TFields extends AirtableFields = AirtableFields> = {
+  id: AirtableRecordId;
+  createdTime?: AirtableCreatedTime;
+  fields: TFields;
 };
+
 /**
  * @name AirtableListResponse
  * @kind Type
@@ -336,10 +342,13 @@ type AirtableRecord<TFields extends AirtableFields = AirtableFields> = {
  * @see AirtableOffset
  * @see AirtableListParams
  */
-type AirtableListResponse<TFields extends AirtableFields = AirtableFields> = {
-    records: Array<AirtableRecord<TFields>>;
-    offset?: AirtableOffset;
+export type AirtableListResponse<
+  TFields extends AirtableFields = AirtableFields,
+> = {
+  records: Array<AirtableRecord<TFields>>;
+  offset?: AirtableOffset;
 };
+
 /**
  * @name AirtableSort
  * @kind Type
@@ -396,10 +405,11 @@ type AirtableListResponse<TFields extends AirtableFields = AirtableFields> = {
  *
  * @see AirtableListParams
  */
-type AirtableSort = {
-    field: string;
-    direction?: "asc" | "desc";
+export type AirtableSort = {
+  field: string;
+  direction?: "asc" | "desc";
 };
+
 /**
  * @name AirtableListParams
  * @kind Type
@@ -474,33 +484,39 @@ type AirtableSort = {
  * @see AirtableSort
  * @see AirtableOffset
  */
-type AirtableListParams = {
-    /**
-     * A saved view name in Airtable.
-     */
-    view?: string;
-    /**
-     * Formula string used by Airtable to filter results.
-     * Example: "AND({Status}='Open',{Country}='IT')"
-     */
-    filterByFormula?: string;
-    /**
-     * Maximum number of records to return (Airtable will cap anyway).
-     */
-    maxRecords?: number;
-    /**
-     * Page size for pagination (Airtable default is 100).
-     */
-    pageSize?: number;
-    /**
-     * Airtable pagination cursor.
-     */
-    offset?: AirtableOffset;
-    /**
-     * Sort configuration.
-     */
-    sort?: AirtableSort[];
+export type AirtableListParams = {
+  /**
+   * A saved view name in Airtable.
+   */
+  view?: string;
+
+  /**
+   * Formula string used by Airtable to filter results.
+   * Example: "AND({Status}='Open',{Country}='IT')"
+   */
+  filterByFormula?: string;
+
+  /**
+   * Maximum number of records to return (Airtable will cap anyway).
+   */
+  maxRecords?: number;
+
+  /**
+   * Page size for pagination (Airtable default is 100).
+   */
+  pageSize?: number;
+
+  /**
+   * Airtable pagination cursor.
+   */
+  offset?: AirtableOffset;
+
+  /**
+   * Sort configuration.
+   */
+  sort?: AirtableSort[];
 };
+
 /**
  * @name AirtableCreatePayload
  * @kind Type
@@ -565,9 +581,12 @@ type AirtableListParams = {
  * @see AirtableUpdatePayload
  * @see AirtableBatchCreatePayload
  */
-type AirtableCreatePayload<TFields extends AirtableFields = AirtableFields> = {
-    fields: Partial<TFields>;
+export type AirtableCreatePayload<
+  TFields extends AirtableFields = AirtableFields,
+> = {
+  fields: Partial<TFields>;
 };
+
 /**
  * @name AirtableUpdatePayload
  * @kind Type
@@ -632,9 +651,12 @@ type AirtableCreatePayload<TFields extends AirtableFields = AirtableFields> = {
  * @see AirtableCreatePayload
  * @see AirtableBatchUpdatePayload
  */
-type AirtableUpdatePayload<TFields extends AirtableFields = AirtableFields> = {
-    fields: Partial<TFields>;
+export type AirtableUpdatePayload<
+  TFields extends AirtableFields = AirtableFields,
+> = {
+  fields: Partial<TFields>;
 };
+
 /**
  * @name AirtableBatchCreatePayload
  * @kind Type
@@ -702,9 +724,12 @@ type AirtableUpdatePayload<TFields extends AirtableFields = AirtableFields> = {
  * @see AirtableCreatePayload
  * @see AirtableBatchUpdatePayload
  */
-type AirtableBatchCreatePayload<TFields extends AirtableFields = AirtableFields> = {
-    records: Array<AirtableCreatePayload<TFields>>;
+export type AirtableBatchCreatePayload<
+  TFields extends AirtableFields = AirtableFields,
+> = {
+  records: Array<AirtableCreatePayload<TFields>>;
 };
+
 /**
  * @name AirtableBatchUpdatePayload
  * @kind Type
@@ -776,10 +801,12 @@ type AirtableBatchCreatePayload<TFields extends AirtableFields = AirtableFields>
  * @see AirtableRecordId
  * @see AirtableBatchCreatePayload
  */
-type AirtableBatchUpdatePayload<TFields extends AirtableFields = AirtableFields> = {
-    records: Array<AirtableUpdatePayload<TFields> & {
-        id: AirtableRecordId;
-    }>;
+export type AirtableBatchUpdatePayload<
+  TFields extends AirtableFields = AirtableFields,
+> = {
+  records: Array<
+    AirtableUpdatePayload<TFields> & {
+      id: AirtableRecordId;
+    }
+  >;
 };
-
-export type { AirtableBatchCreatePayload, AirtableBatchUpdatePayload, AirtableCreatePayload, AirtableCreatedTime, AirtableFields, AirtableListParams, AirtableListResponse, AirtableOffset, AirtableRecord, AirtableRecordId, AirtableSort, AirtableUpdatePayload };
