@@ -5,7 +5,7 @@ A TypeScript library for working with the Airtable REST API. Designed for server
 ## Installation
 
 ```bash
-npm install @scope/airtable
+npm install @te3sk/airtable-core
 ```
 
 ## Overview

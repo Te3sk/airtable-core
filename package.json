@@ -1,7 +1,7 @@
 {
-  "name": "@scope/airtable",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@te3sk/airtable-core",
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
   "files": [
     "dist"
@@ -26,6 +26,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
