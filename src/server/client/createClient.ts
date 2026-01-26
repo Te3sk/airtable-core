@@ -106,6 +106,7 @@ export type AirtableClientConfig = {
  * @description
  * Type definition representing an Airtable client instance with methods for CRUD operations.
  * Provides type-safe methods for listing, retrieving, creating, updating, and deleting records.
+ * Includes listRecords and listPage methods (listPage is an alias for listRecords for semantic clarity).
  * All methods are generic over TFields to allow consumers to specify field shapes.
  * Returned by createAirtableClient after initialization with valid configuration.
  *
@@ -121,6 +122,7 @@ export type AirtableClientConfig = {
  * @dependencies
  * @requires ./request airtableRequest function for HTTP requests
  * @requires ./endpoints URL building utilities
+ * @requires ../../core/types/airtable AirtableCreatePayload and AirtableUpdatePayload types for request bodies
  *
  * @performance
  * @complexity O(1) - type definition only
@@ -138,12 +140,16 @@ export type AirtableClientConfig = {
  * @supported Node.js 18+, modern browsers with fetch API
  * @notSupported Node.js < 18 without fetch polyfill
  *
- * @returns {Object} Object with methods: listRecords, getRecord, createRecord, updateRecord, deleteRecord.
+ * @returns {Object} Object with methods: listRecords, listPage, getRecord, createRecord, updateRecord, deleteRecord.
  *
  * @example
  * // Basic usage
  * const client = createAirtableClient({ token: "pat...", baseId: "app..." });
  * const records = await client.listRecords("Tasks");
+ *
+ * @example
+ * // Using listPage alias (same as listRecords)
+ * const page = await client.listPage("Tasks", { pageSize: 50 });
  *
  * @example
  * // Advanced usage with typed fields
@@ -152,12 +158,19 @@ export type AirtableClientConfig = {
  *
  * @remarks
  * All methods return Promises and should be awaited. Methods are generic over TFields for type safety.
+ * listPage is an alias for listRecords, provided for semantic clarity when fetching paginated results.
+ * createRecord and updateRecord use AirtableCreatePayload and AirtableUpdatePayload types respectively.
  *
  * @see createAirtableClient
  * @see AirtableClientConfig
  */
 export type AirtableClient = {
   listRecords: <TFields extends AirtableFields = AirtableFields>(
+    tableName: string,
+    params?: AirtableListParams,
+  ) => Promise<AirtableListResponse<TFields>>;
+
+  listPage: <TFields extends AirtableFields = AirtableFields>(
     tableName: string,
     params?: AirtableListParams,
   ) => Promise<AirtableListResponse<TFields>>;
@@ -194,6 +207,8 @@ export type AirtableClient = {
  * Validates required configuration (token and baseId), sets defaults for optional settings (apiUrl, timeoutMs),
  * and initializes internal request configuration. Returns an object with CRUD methods for records.
  * All methods use the configured token and base ID for authentication and routing.
+ * Creates listRecords and listPage methods (listPage is an alias for listRecords).
+ * Uses AirtableCreatePayload and AirtableUpdatePayload types for request body validation.
  *
  * @category API
  * @since Not specified
@@ -207,6 +222,7 @@ export type AirtableClient = {
  * @dependencies
  * @requires ./request airtableRequest function for HTTP requests
  * @requires ./endpoints URL building utilities (buildBaseUrl, buildTablePath, buildRecordPath, buildListQuery)
+ * @requires ../../core/types/airtable AirtableCreatePayload and AirtableUpdatePayload types for request bodies
  *
  * @performance
  * @complexity O(1) - lightweight factory function, no heavy computation
@@ -226,7 +242,7 @@ export type AirtableClient = {
  *
  * @param {AirtableClientConfig} config - Configuration object with token, baseId, and optional apiUrl and timeoutMs.
  *
- * @returns {AirtableClient} Client instance with methods: listRecords, getRecord, createRecord, updateRecord, deleteRecord.
+ * @returns {AirtableClient} Client instance with methods: listRecords, listPage, getRecord, createRecord, updateRecord, deleteRecord.
  *
  * @throws {Error} When token is missing or empty - message: "createAirtableClient: `token` is required"
  * @throws {Error} When baseId is missing or empty - message: "createAirtableClient: `baseId` is required"
@@ -238,6 +254,10 @@ export type AirtableClient = {
  *   baseId: "app456..."
  * });
  * const records = await client.listRecords("Tasks");
+ *
+ * @example
+ * // Using listPage alias
+ * const page = await client.listPage("Tasks", { pageSize: 50, offset: "itr123" });
  *
  * @example
  * // Advanced usage with custom settings
@@ -252,6 +272,8 @@ export type AirtableClient = {
  * @remarks
  * The client instance maintains configuration in closures. Token and baseId are validated at creation time.
  * All client methods are async and return Promises. Network errors are thrown as AirtableHttpError.
+ * listPage is an alias for listRecords, provided for semantic clarity when working with pagination.
+ * createRecord and updateRecord use type assertions with AirtableCreatePayload and AirtableUpdatePayload respectively.
  *
  * @see AirtableClientConfig
  * @see AirtableClient
@@ -274,18 +296,21 @@ export function createAirtableClient(
     timeoutMs,
   };
 
+  async function listRecords<TFields extends AirtableFields = AirtableFields>(
+    tableName: string,
+    params?: AirtableListParams,
+  ): Promise<AirtableListResponse<TFields>> {
+    const url = `${baseUrl}${buildTablePath(tableName)}${buildListQuery(params)}`;
+    return airtableRequest<AirtableListResponse<TFields>>({
+      url,
+      method: "GET",
+      config: reqConfig,
+    });
+  }
+
   return {
-    async listRecords<TFields extends AirtableFields = AirtableFields>(
-      tableName: string,
-      params?: AirtableListParams,
-    ): Promise<AirtableListResponse<TFields>> {
-      const url = `${baseUrl}${buildTablePath(tableName)}${buildListQuery(params)}`;
-      return airtableRequest<AirtableListResponse<TFields>>({
-        url,
-        method: "GET",
-        config: reqConfig,
-      });
-    },
+    listRecords,
+    listPage: listRecords,
 
     async getRecord<TFields extends AirtableFields = AirtableFields>(
       tableName: string,

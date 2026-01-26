@@ -3,3 +3,5 @@ export * from "./client/createClient";
 export * from "./client/request";
 export * from "./client/pagination";
 export * from "./client/endpoints";
+export * from "./repos/createTableRepo";
+export * from "./repos/leadsRepo";

@@ -1,3 +1,8 @@
+import {
+  leadFromRecord,
+  leadToFields
+} from "../chunk-IMLSMXJQ.js";
+
 // src/server/client/request.ts
 var AirtableHttpError = class extends Error {
   status;
@@ -13,6 +18,36 @@ var AirtableHttpError = class extends Error {
     this.details = args.details;
   }
 };
+var AirtableAuthError = class extends AirtableHttpError {
+  constructor(base) {
+    super({ status: base.status, statusText: base.statusText, url: base.url, message: base.message, details: base.details });
+    this.name = "AirtableAuthError";
+  }
+};
+var AirtableRateLimitError = class extends AirtableHttpError {
+  constructor(base) {
+    super({ status: base.status, statusText: base.statusText, url: base.url, message: base.message, details: base.details });
+    this.name = "AirtableRateLimitError";
+  }
+};
+var AirtableNotFoundError = class extends AirtableHttpError {
+  constructor(base) {
+    super({ status: base.status, statusText: base.statusText, url: base.url, message: base.message, details: base.details });
+    this.name = "AirtableNotFoundError";
+  }
+};
+var AirtableValidationError = class extends AirtableHttpError {
+  constructor(base) {
+    super({ status: base.status, statusText: base.statusText, url: base.url, message: base.message, details: base.details });
+    this.name = "AirtableValidationError";
+  }
+};
+var AirtableNetworkError = class extends AirtableHttpError {
+  constructor(args) {
+    super({ status: 503, statusText: "Network Error", url: args.url, message: args.message, details: args.details });
+    this.name = "AirtableNetworkError";
+  }
+};
 function safeJsonParse(text) {
   try {
     return JSON.parse(text);
@@ -25,11 +60,17 @@ function normalizeErrorMessage(status, statusText, details) {
     const anyDetails = details;
     const msg = anyDetails?.error?.message;
     const typ = anyDetails?.error?.type;
-    if (typeof msg === "string" && typeof typ === "string")
-      return `${typ}: ${msg}`;
+    if (typeof msg === "string" && typeof typ === "string") return `${typ}: ${msg}`;
     if (typeof msg === "string") return msg;
   }
   return `${status} ${statusText}`.trim();
+}
+function toSpecificError(err) {
+  if (err.status === 401 || err.status === 403) return new AirtableAuthError(err);
+  if (err.status === 404) return new AirtableNotFoundError(err);
+  if (err.status === 422) return new AirtableValidationError(err);
+  if (err.status === 429) return new AirtableRateLimitError(err);
+  return err;
 }
 async function airtableRequest(args) {
   const { url, method, config, body } = args;
@@ -50,13 +91,14 @@ async function airtableRequest(args) {
     const parsed = contentType.includes("application/json") ? safeJsonParse(rawText) : rawText;
     if (!res.ok) {
       const message = normalizeErrorMessage(res.status, res.statusText, parsed);
-      throw new AirtableHttpError({
+      const baseErr = new AirtableHttpError({
         status: res.status,
         statusText: res.statusText,
         url,
         message,
         details: parsed
       });
+      throw toSpecificError(baseErr);
     }
     return parsed ?? rawText;
   } catch (err) {
@@ -68,7 +110,11 @@ async function airtableRequest(args) {
         message: `Request timed out after ${config.timeoutMs}ms`
       });
     }
-    throw err;
+    if (err instanceof AirtableHttpError) {
+      throw err;
+    }
+    const msg = typeof err?.message === "string" ? err.message : "Network request failed";
+    throw new AirtableNetworkError({ url, message: msg, details: err });
   } finally {
     clearTimeout(timeout);
   }
@@ -108,22 +154,26 @@ function buildListQuery(params) {
 function createAirtableClient(config) {
   const apiUrl = config.apiUrl ?? DEFAULT_AIRTABLE_API_URL;
   const timeoutMs = config.timeoutMs ?? 15e3;
-  if (!config.token) throw new Error("createAirtableClient: `token` is required");
-  if (!config.baseId) throw new Error("createAirtableClient: `baseId` is required");
+  if (!config.token)
+    throw new Error("createAirtableClient: `token` is required");
+  if (!config.baseId)
+    throw new Error("createAirtableClient: `baseId` is required");
   const baseUrl = buildBaseUrl(apiUrl, config.baseId);
   const reqConfig = {
     token: config.token,
     timeoutMs
   };
+  async function listRecords(tableName, params) {
+    const url = `${baseUrl}${buildTablePath(tableName)}${buildListQuery(params)}`;
+    return airtableRequest({
+      url,
+      method: "GET",
+      config: reqConfig
+    });
+  }
   return {
-    async listRecords(tableName, params) {
-      const url = `${baseUrl}${buildTablePath(tableName)}${buildListQuery(params)}`;
-      return airtableRequest({
-        url,
-        method: "GET",
-        config: reqConfig
-      });
-    },
+    listRecords,
+    listPage: listRecords,
     async getRecord(tableName, recordId) {
       const url = `${baseUrl}${buildRecordPath(tableName, recordId)}`;
       return airtableRequest({
@@ -183,8 +233,65 @@ async function listAllRecords(args) {
   }
   return out;
 }
+
+// src/server/repos/createTableRepo.ts
+function createTableRepo(args) {
+  const { client, tableName, mapper } = args;
+  return {
+    async listPage(params) {
+      const page = await client.listRecords(tableName, params);
+      return {
+        records: page.records.map(mapper.fromRecord),
+        offset: page.offset
+      };
+    },
+    async listAll(params, options) {
+      const records = await listAllRecords({
+        client,
+        tableName,
+        params,
+        options
+      });
+      return records.map(mapper.fromRecord);
+    },
+    async get(recordId) {
+      const record = await client.getRecord(tableName, recordId);
+      return mapper.fromRecord(record);
+    },
+    async create(model) {
+      const fields = mapper.toFields(model);
+      const record = await client.createRecord(tableName, fields);
+      return mapper.fromRecord(record);
+    },
+    async update(recordId, patch) {
+      const fields = mapper.toFields(patch);
+      const record = await client.updateRecord(tableName, recordId, fields);
+      return mapper.fromRecord(record);
+    },
+    async delete(recordId) {
+      return client.deleteRecord(tableName, recordId);
+    }
+  };
+}
+
+// src/server/repos/leadsRepo.ts
+function createLeadsRepo(args) {
+  return createTableRepo({
+    client: args.client,
+    tableName: args.tableName ?? "Leads",
+    mapper: {
+      toFields: leadToFields,
+      fromRecord: leadFromRecord
+    }
+  });
+}
 export {
+  AirtableAuthError,
   AirtableHttpError,
+  AirtableNetworkError,
+  AirtableNotFoundError,
+  AirtableRateLimitError,
+  AirtableValidationError,
   DEFAULT_AIRTABLE_API_URL,
   airtableRequest,
   buildBaseUrl,
@@ -192,6 +299,8 @@ export {
   buildRecordPath,
   buildTablePath,
   createAirtableClient,
+  createLeadsRepo,
+  createTableRepo,
   listAllRecords
 };
 //# sourceMappingURL=index.js.map

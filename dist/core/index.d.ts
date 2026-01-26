@@ -782,4 +782,24 @@ type AirtableBatchUpdatePayload<TFields extends AirtableFields = AirtableFields>
     }>;
 };
 
-export type { AirtableBatchCreatePayload, AirtableBatchUpdatePayload, AirtableCreatePayload, AirtableCreatedTime, AirtableFields, AirtableListParams, AirtableListResponse, AirtableOffset, AirtableRecord, AirtableRecordId, AirtableSort, AirtableUpdatePayload };
+type Lead = {
+    id?: string;
+    createdTime?: string;
+    name: string;
+    email?: string;
+    phone?: string;
+};
+
+/**
+ * Airtable fields shape for the "Leads" table.
+ * Keep field names exactly as they are in Airtable.
+ */
+type LeadFields = {
+    Name: string;
+    Email?: string;
+    Phone?: string;
+};
+declare function leadToFields(model: Partial<Lead>): Partial<LeadFields>;
+declare function leadFromRecord(record: AirtableRecord<LeadFields>): Lead;
+
+export { type AirtableBatchCreatePayload, type AirtableBatchUpdatePayload, type AirtableCreatePayload, type AirtableCreatedTime, type AirtableFields, type AirtableListParams, type AirtableListResponse, type AirtableOffset, type AirtableRecord, type AirtableRecordId, type AirtableSort, type AirtableUpdatePayload, type Lead, type LeadFields, leadFromRecord, leadToFields };
