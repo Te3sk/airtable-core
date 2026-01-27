@@ -234,6 +234,17 @@ async function listAllRecords(args) {
   return out;
 }
 
+// src/server/client/attachments.ts
+async function addAttachmentToRecord(args) {
+  const { client, tableName, recordId, fieldName, attachment } = args;
+  const currentRecord = await client.getRecord(tableName, recordId);
+  const existingAttachments = currentRecord.fields[fieldName] ?? [];
+  const updatedAttachments = [...existingAttachments, attachment];
+  return client.updateRecord(tableName, recordId, {
+    [fieldName]: updatedAttachments
+  });
+}
+
 // src/server/repos/createTableRepo.ts
 function createTableRepo(args) {
   const { client, tableName, mapper } = args;
@@ -293,6 +304,7 @@ export {
   AirtableRateLimitError,
   AirtableValidationError,
   DEFAULT_AIRTABLE_API_URL,
+  addAttachmentToRecord,
   airtableRequest,
   buildBaseUrl,
   buildListQuery,

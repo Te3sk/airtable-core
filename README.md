@@ -83,9 +83,42 @@ const updated = await client.updateRecord("Tasks", "rec123", {
   Status: "Closed",
 });
 
+// Update a record
+const updated = await client.updateRecord("Tasks", "rec123", {
+  Status: "Closed",
+});
+
 // Delete a record
 await client.deleteRecord("Tasks", "rec123");
 ```
+
+### Working with Attachments
+
+To add an attachment (e.g., a PDF) to a record's attachment field without overwriting existing attachments:
+
+```typescript
+import { addAttachmentToRecord, type AirtableAttachment } from "@scope/airtable/server";
+
+// Add a PDF to an attachment field
+const updated = await addAttachmentToRecord({
+  client,
+  tableName: "Documents",
+  recordId: "rec123",
+  fieldName: "PDF File",
+  attachment: {
+    url: "https://example.com/document.pdf",
+    filename: "document.pdf",
+    type: "application/pdf"
+  }
+});
+```
+
+The `addAttachmentToRecord` helper function:
+- Fetches the current record to preserve existing attachments
+- Appends the new attachment to the existing array
+- Updates the record with the complete attachment list
+
+**Important:** The attachment URL must be publicly accessible and directly downloadable. Airtable will download the file from this URL.
 
 ### Auto-Pagination
 
