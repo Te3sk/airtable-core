@@ -161,6 +161,11 @@ type AirtableClient = {
      * @internal
      */
     _request: <TResponse = unknown>(url: string, method: "GET" | "POST" | "PATCH" | "DELETE", body?: unknown) => Promise<TResponse>;
+    /**
+     * Makes a multipart/form-data request to the Airtable API. Used for file uploads.
+     * @internal
+     */
+    _requestMultipart: <TResponse = unknown>(url: string, formData: FormData) => Promise<TResponse>;
 };
 /**
  * @name createAirtableClient

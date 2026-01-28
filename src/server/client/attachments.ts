@@ -132,6 +132,12 @@ function isUrl(str: string): boolean {
 
 /**
  * Uploads a local file to Airtable using the uploadAttachment endpoint
+ * 
+ * Note: 
+ * - This endpoint requires multipart/form-data, not JSON
+ * - The endpoint URL uses content.airtable.com, not api.airtable.com
+ * - The endpoint accepts fieldId (like "fldXXXXXXXXXXXXXX") or fieldName
+ * - FieldId is more reliable, but fieldName may work in some cases
  */
 async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   client: AirtableClient,
@@ -142,8 +148,15 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   filename?: string,
   contentType?: string,
 ): Promise<import("../../core/types/airtable").AirtableRecord<TFields>> {
-  // Read file and convert to base64
-  const { base64 } = await readFileAsBase64(filePath);
+  // Read file as Buffer (not base64 string)
+  const buffer = await fs.readFile(filePath);
+  const size = buffer.length;
+
+  if (size > MAX_FILE_SIZE) {
+    throw new Error(
+      `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`,
+    );
+  }
 
   // Determine filename
   const finalFilename = filename || getFilenameFromPath(filePath);
@@ -151,22 +164,31 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   // Determine content type
   const finalContentType = contentType || getMimeTypeFromExtension(filePath);
 
-  // Build upload URL: POST /v0/{baseId}/{recordId}/{fieldIdOrName}/uploadAttachment
-  const apiUrl = client.apiUrl.replace(/\/+$/, ""); // Remove trailing slashes
+  // Build upload URL: POST https://content.airtable.com/v0/{baseId}/{recordId}/{fieldId}/uploadAttachment
+  // Note: uploadAttachment endpoint uses content.airtable.com, not api.airtable.com
+  // The endpoint accepts fieldId (field ID like "fldXXXXXXXXXXXXXX") or fieldName
+  // FieldId is preferred and more reliable, but we'll try with fieldName for convenience
+  // If fieldName doesn't work, users should pass the fieldId instead
+  const contentApiUrl = client.apiUrl.replace("api.airtable.com", "content.airtable.com").replace(/\/+$/, "");
   const encodedBaseId = encodeURIComponent(client.baseId);
   const encodedRecordId = encodeURIComponent(recordId);
   const encodedFieldName = encodeURIComponent(fieldName);
-  const uploadUrl = `${apiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
+  const uploadUrl = `${contentApiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
 
-  // Make the upload request using the client's internal request method
-  const response = await client._request<import("../../core/types/airtable").AirtableRecord<TFields>>(
+  // Create FormData for multipart/form-data upload
+  // Note: In Node.js 18+, FormData is available globally
+  // The endpoint expects the file as multipart/form-data with field name "file"
+  const formData = new FormData();
+  
+  // In Node.js, we need to create a Blob from the buffer
+  // FormData.append accepts Blob, File, or string
+  const blob = new Blob([buffer], { type: finalContentType });
+  formData.append("file", blob, finalFilename);
+
+  // Make the upload request with multipart/form-data using the client's multipart method
+  const response = await client._requestMultipart<import("../../core/types/airtable").AirtableRecord<TFields>>(
     uploadUrl,
-    "POST",
-    {
-      contentType: finalContentType,
-      file: base64,
-      filename: finalFilename,
-    },
+    formData,
   );
 
   return response;

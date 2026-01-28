@@ -9,7 +9,12 @@ import type {
   AirtableUpdatePayload,
 } from "../../core/types/airtable";
 // imports from server client request
-import { airtableRequest, type AirtableRequestConfig } from "./request";
+import {
+  airtableRequest,
+  type AirtableRequestConfig,
+  AirtableHttpError,
+  AirtableNetworkError,
+} from "./request";
 // imports from server client endpoints
 import {
   DEFAULT_AIRTABLE_API_URL,
@@ -208,6 +213,15 @@ export type AirtableClient = {
     method: "GET" | "POST" | "PATCH" | "DELETE",
     body?: unknown,
   ) => Promise<TResponse>;
+
+  /**
+   * Makes a multipart/form-data request to the Airtable API. Used for file uploads.
+   * @internal
+   */
+  _requestMultipart: <TResponse = unknown>(
+    url: string,
+    formData: FormData,
+  ) => Promise<TResponse>;
 };
 
 /**
@@ -390,6 +404,74 @@ export function createAirtableClient(
         config: reqConfig,
         body,
       });
+    },
+
+    async _requestMultipart<TResponse = unknown>(
+      url: string,
+      formData: FormData,
+    ): Promise<TResponse> {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), reqConfig.timeoutMs);
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${reqConfig.token}`,
+            // Don't set Content-Type - browser/fetch will set it with boundary for multipart/form-data
+          },
+          body: formData,
+        });
+
+        const contentType = res.headers.get("content-type") ?? "";
+        const rawText = await res.text();
+        const parsed = contentType.includes("application/json")
+          ? (JSON.parse(rawText) as unknown)
+          : rawText;
+
+        if (!res.ok) {
+          const message =
+            typeof parsed === "object" &&
+            parsed !== null &&
+            "error" in parsed &&
+            typeof (parsed as any).error === "object" &&
+            (parsed as any).error?.message
+              ? (parsed as any).error.message
+              : `Request failed with status ${res.status}`;
+          const baseErr = new AirtableHttpError({
+            status: res.status,
+            statusText: res.statusText,
+            url,
+            message,
+            details: parsed,
+          });
+          throw baseErr;
+        }
+
+        return (parsed as TResponse) ?? (rawText as unknown as TResponse);
+      } catch (err: any) {
+        // Timeout / Abort normalization
+        if (err?.name === "AbortError") {
+          throw new AirtableHttpError({
+            status: 408,
+            statusText: "Request Timeout",
+            url,
+            message: `Request timed out after ${reqConfig.timeoutMs}ms`,
+          });
+        }
+
+        // If it's already an AirtableHttpError, keep it
+        if (err instanceof AirtableHttpError) {
+          throw err;
+        }
+
+        // Normalize fetch/network errors
+        const msg = typeof err?.message === "string" ? err.message : "Network request failed";
+        throw new AirtableNetworkError({ url, message: msg, details: err });
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 }

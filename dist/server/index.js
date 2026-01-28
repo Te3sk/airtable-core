@@ -217,6 +217,52 @@ function createAirtableClient(config) {
         config: reqConfig,
         body
       });
+    },
+    async _requestMultipart(url, formData) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), reqConfig.timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${reqConfig.token}`
+            // Don't set Content-Type - browser/fetch will set it with boundary for multipart/form-data
+          },
+          body: formData
+        });
+        const contentType = res.headers.get("content-type") ?? "";
+        const rawText = await res.text();
+        const parsed = contentType.includes("application/json") ? JSON.parse(rawText) : rawText;
+        if (!res.ok) {
+          const message = typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "object" && parsed.error?.message ? parsed.error.message : `Request failed with status ${res.status}`;
+          const baseErr = new AirtableHttpError({
+            status: res.status,
+            statusText: res.statusText,
+            url,
+            message,
+            details: parsed
+          });
+          throw baseErr;
+        }
+        return parsed ?? rawText;
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          throw new AirtableHttpError({
+            status: 408,
+            statusText: "Request Timeout",
+            url,
+            message: `Request timed out after ${reqConfig.timeoutMs}ms`
+          });
+        }
+        if (err instanceof AirtableHttpError) {
+          throw err;
+        }
+        const msg = typeof err?.message === "string" ? err.message : "Network request failed";
+        throw new AirtableNetworkError({ url, message: msg, details: err });
+      } finally {
+        clearTimeout(timeout);
+      }
     }
   };
 }
@@ -272,24 +318,6 @@ function getMimeTypeFromExtension(filePath) {
   const ext = extname(filePath).toLowerCase();
   return MIME_TYPES[ext] || "application/octet-stream";
 }
-async function readFileAsBase64(filePath) {
-  try {
-    const buffer = await fs.readFile(filePath);
-    const size = buffer.length;
-    if (size > MAX_FILE_SIZE) {
-      throw new Error(
-        `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`
-      );
-    }
-    const base64 = buffer.toString("base64");
-    return { base64, size };
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new Error(`File not found: ${filePath}`);
-    }
-    throw error;
-  }
-}
 function getFilenameFromPath(filePath) {
   const parts = filePath.split(/[/\\]/);
   return parts[parts.length - 1] || "file";
@@ -298,22 +326,26 @@ function isUrl(str) {
   return str.startsWith("http://") || str.startsWith("https://");
 }
 async function uploadLocalFile(client, tableName, recordId, fieldName, filePath, filename, contentType) {
-  const { base64 } = await readFileAsBase64(filePath);
+  const buffer = await fs.readFile(filePath);
+  const size = buffer.length;
+  if (size > MAX_FILE_SIZE) {
+    throw new Error(
+      `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`
+    );
+  }
   const finalFilename = filename || getFilenameFromPath(filePath);
   const finalContentType = contentType || getMimeTypeFromExtension(filePath);
-  const apiUrl = client.apiUrl.replace(/\/+$/, "");
+  const contentApiUrl = client.apiUrl.replace("api.airtable.com", "content.airtable.com").replace(/\/+$/, "");
   const encodedBaseId = encodeURIComponent(client.baseId);
   const encodedRecordId = encodeURIComponent(recordId);
   const encodedFieldName = encodeURIComponent(fieldName);
-  const uploadUrl = `${apiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
-  const response = await client._request(
+  const uploadUrl = `${contentApiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
+  const formData = new FormData();
+  const blob = new Blob([buffer], { type: finalContentType });
+  formData.append("file", blob, finalFilename);
+  const response = await client._requestMultipart(
     uploadUrl,
-    "POST",
-    {
-      contentType: finalContentType,
-      file: base64,
-      filename: finalFilename
-    }
+    formData
   );
   return response;
 }
