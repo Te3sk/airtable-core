@@ -318,6 +318,24 @@ function getMimeTypeFromExtension(filePath) {
   const ext = extname(filePath).toLowerCase();
   return MIME_TYPES[ext] || "application/octet-stream";
 }
+async function readFileAsBase64(filePath) {
+  try {
+    const buffer = await fs.readFile(filePath);
+    const size = buffer.length;
+    if (size > MAX_FILE_SIZE) {
+      throw new Error(
+        `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`
+      );
+    }
+    const base64 = buffer.toString("base64");
+    return { base64, size };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw error;
+  }
+}
 function getFilenameFromPath(filePath) {
   const parts = filePath.split(/[/\\]/);
   return parts[parts.length - 1] || "file";
@@ -410,9 +428,10 @@ async function uploadLocalFile(client, tableName, recordId, fieldName, filePath,
       `uploadLocalFile: Failed to build upload URL: ${error.message || "Unknown error"}. baseId: "${client.baseId}", recordId: "${recordId}", fieldName: "${fieldName}"`
     );
   }
-  let buffer;
+  let base64;
   try {
-    buffer = await fs.readFile(filePath);
+    const res = await readFileAsBase64(filePath);
+    base64 = res.base64;
   } catch (error) {
     if (error.code === "ENOENT") {
       throw new Error(
@@ -438,25 +457,20 @@ async function uploadLocalFile(client, tableName, recordId, fieldName, filePath,
       `uploadLocalFile: Failed to read file "${filePath}": ${error.message || error.code || "Unknown error"}`
     );
   }
-  if (!buffer || buffer.length === 0) {
+  if (!base64 || base64.length === 0) {
     throw new Error(
       `uploadLocalFile: File "${filePath}" appears to be empty or could not be read properly.`
     );
   }
-  let formData;
   try {
-    formData = new FormData();
-    const blob = new Blob([new Uint8Array(buffer)], { type: finalContentType });
-    formData.append("file", blob, finalFilename);
-  } catch (error) {
-    throw new Error(
-      `uploadLocalFile: Failed to create FormData for file "${filePath}": ${error.message || "Unknown error"}`
-    );
-  }
-  try {
-    const response = await client._requestMultipart(
+    const response = await client._request(
       uploadUrl,
-      formData
+      "POST",
+      {
+        contentType: finalContentType,
+        file: base64,
+        filename: finalFilename
+      }
     );
     return response;
   } catch (error) {
@@ -472,7 +486,7 @@ async function uploadLocalFile(client, tableName, recordId, fieldName, filePath,
       } else if (error instanceof AirtableRateLimitError) {
         enhancedMessage = `${contextInfo}. Rate limit exceeded (${error.status}): ${error.message}. Please wait before retrying the upload. Consider implementing exponential backoff.`;
       } else if (error.status === 400) {
-        enhancedMessage = `${contextInfo}. Bad request (${error.status}): ${error.message}. Common causes: 1) Invalid field name "${fieldName}" (try using fieldId like "fldXXXXXXXXXXXXXX"), 2) File format not supported, 3) Malformed request. Check the error details for more information.`;
+        enhancedMessage = `${contextInfo}. Bad request (${error.status}): ${error.message}. Common causes: 1) Invalid field name "${fieldName}" (try using fieldId like "fldXXXXXXXXXXXXXX"), 2) Field is not an attachment field, 3) Request body is malformed (must be JSON with { contentType, file (base64), filename }), Check the error details for more information.`;
       } else if (error.status === 413) {
         enhancedMessage = `${contextInfo}. Payload too large (${error.status}): ${error.message}. File size (${stats.size} bytes) may exceed Airtable's limits even if under 5MB. Try compressing the file or using a smaller file.`;
       } else if (error.status >= 500) {

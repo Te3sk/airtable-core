@@ -142,7 +142,7 @@ function isUrl(str: string): boolean {
  * Uploads a local file to Airtable using the uploadAttachment endpoint
  * 
  * Note: 
- * - This endpoint requires multipart/form-data, not JSON
+ * - This endpoint expects JSON (not multipart): { contentType, file (base64), filename }
  * - The endpoint URL uses content.airtable.com, not api.airtable.com
  * - The endpoint accepts fieldId (like "fldXXXXXXXXXXXXXX") or fieldName
  * - FieldId is more reliable, but fieldName may work in some cases
@@ -269,9 +269,11 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   }
 
   // Read file as Buffer
-  let buffer: Buffer;
+  let base64: string;
   try {
-    buffer = await fs.readFile(filePath);
+    // Airtable uploadAttachment expects the file bytes as a base64 string (JSON body)
+    const res = await readFileAsBase64(filePath);
+    base64 = res.base64;
   } catch (error: any) {
     // Handle read errors with detailed messages
     if (error.code === "ENOENT") {
@@ -300,40 +302,25 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
     );
   }
 
-  // Validate buffer was read correctly
-  if (!buffer || buffer.length === 0) {
+  // Validate base64 was read correctly
+  if (!base64 || base64.length === 0) {
     throw new Error(
       `uploadLocalFile: File "${filePath}" appears to be empty or could not be read properly.`,
     );
   }
 
-  // Create FormData for multipart/form-data upload
-  // Note: In Node.js 18+, FormData is available globally
-  // The endpoint expects the file as multipart/form-data with field name "file"
-  let formData: FormData;
+  // Make the upload request using JSON body as documented by Airtable:
+  // POST https://content.airtable.com/v0/{baseId}/{recordId}/{attachmentFieldIdOrName}/uploadAttachment
+  // Body: { contentType, file (base64), filename }
   try {
-    formData = new FormData();
-    
-    // Create a Blob from the buffer with the correct MIME type
-    // In Node.js, Blob is more reliably supported than File across versions
-    // Convert Buffer to Uint8Array for TypeScript compatibility
-    const blob = new Blob([new Uint8Array(buffer)], { type: finalContentType });
-    
-    // Append blob to FormData with filename as third parameter
-    // This ensures the filename is properly included in the multipart/form-data encoding
-    // The third parameter is important for Node.js FormData to correctly encode the filename
-    formData.append("file", blob, finalFilename);
-  } catch (error: any) {
-    throw new Error(
-      `uploadLocalFile: Failed to create FormData for file "${filePath}": ${error.message || "Unknown error"}`,
-    );
-  }
-
-  // Make the upload request with multipart/form-data using the client's multipart method
-  try {
-    const response = await client._requestMultipart<import("../../core/types/airtable").AirtableRecord<TFields>>(
+    const response = await client._request<import("../../core/types/airtable").AirtableRecord<TFields>>(
       uploadUrl,
-      formData,
+      "POST",
+      {
+        contentType: finalContentType,
+        file: base64,
+        filename: finalFilename,
+      },
     );
     return response;
   } catch (error: any) {
@@ -369,8 +356,8 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
       } else if (error.status === 400) {
         enhancedMessage = `${contextInfo}. Bad request (${error.status}): ${error.message}. ` +
           `Common causes: 1) Invalid field name "${fieldName}" (try using fieldId like "fldXXXXXXXXXXXXXX"), ` +
-          `2) File format not supported, ` +
-          `3) Malformed request. ` +
+          `2) Field is not an attachment field, ` +
+          `3) Request body is malformed (must be JSON with { contentType, file (base64), filename }), ` +
           `Check the error details for more information.`;
       } else if (error.status === 413) {
         enhancedMessage = `${contextInfo}. Payload too large (${error.status}): ${error.message}. ` +
