@@ -350,34 +350,42 @@ async function uploadLocalFile(client, tableName, recordId, fieldName, filePath,
   return response;
 }
 async function addAttachmentToRecord(args) {
-  const { client, tableName, recordId, fieldName, attachment } = args;
-  if (!attachment.url && !attachment.filePath) {
+  const { client, tableName, recordId, fieldName, attachment, url, filePath, filename, contentType, size, type } = args;
+  const attachmentObj = attachment || {
+    url,
+    filePath,
+    filename,
+    size,
+    type: type || contentType
+    // Support both 'type' and 'contentType' for convenience
+  };
+  if (!attachmentObj.url && !attachmentObj.filePath) {
     throw new Error(
-      "addAttachmentToRecord: Either 'url' or 'filePath' must be provided in the attachment object"
+      "addAttachmentToRecord: Either 'url' or 'filePath' must be provided (either in attachment object or as direct parameters)"
     );
   }
-  if (attachment.filePath) {
+  if (attachmentObj.filePath) {
     return uploadLocalFile(
       client,
       tableName,
       recordId,
       fieldName,
-      attachment.filePath,
-      attachment.filename,
-      attachment.type
+      attachmentObj.filePath,
+      attachmentObj.filename,
+      attachmentObj.type
     );
   }
-  if (!attachment.url) {
+  if (!attachmentObj.url) {
     throw new Error("addAttachmentToRecord: 'url' is required when 'filePath' is not provided");
   }
-  if (!isUrl(attachment.url)) {
+  if (!isUrl(attachmentObj.url)) {
     throw new Error(
-      `addAttachmentToRecord: Invalid URL format. URL must start with 'http://' or 'https://'. Got: ${attachment.url}`
+      `addAttachmentToRecord: Invalid URL format. URL must start with 'http://' or 'https://'. Got: ${attachmentObj.url}`
     );
   }
   const currentRecord = await client.getRecord(tableName, recordId);
   const existingAttachments = currentRecord.fields[fieldName] ?? [];
-  const updatedAttachments = [...existingAttachments, attachment];
+  const updatedAttachments = [...existingAttachments, attachmentObj];
   return client.updateRecord(tableName, recordId, {
     [fieldName]: updatedAttachments
   });
