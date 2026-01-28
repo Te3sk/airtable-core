@@ -172,6 +172,8 @@ function createAirtableClient(config) {
     });
   }
   return {
+    baseId: config.baseId,
+    apiUrl,
     listRecords,
     listPage: listRecords,
     async getRecord(tableName, recordId) {
@@ -207,6 +209,14 @@ function createAirtableClient(config) {
         method: "DELETE",
         config: reqConfig
       });
+    },
+    async _request(url, method, body) {
+      return airtableRequest({
+        url,
+        method,
+        config: reqConfig,
+        body
+      });
     }
   };
 }
@@ -235,8 +245,104 @@ async function listAllRecords(args) {
 }
 
 // src/server/client/attachments.ts
+import { promises as fs } from "fs";
+import { extname } from "path";
+var MAX_FILE_SIZE = 5 * 1024 * 1024;
+var MIME_TYPES = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".txt": "text/plain",
+  ".csv": "text/csv",
+  ".json": "application/json",
+  ".xml": "application/xml",
+  ".zip": "application/zip",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+};
+function getMimeTypeFromExtension(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  return MIME_TYPES[ext] || "application/octet-stream";
+}
+async function readFileAsBase64(filePath) {
+  try {
+    const buffer = await fs.readFile(filePath);
+    const size = buffer.length;
+    if (size > MAX_FILE_SIZE) {
+      throw new Error(
+        `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`
+      );
+    }
+    const base64 = buffer.toString("base64");
+    return { base64, size };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw error;
+  }
+}
+function getFilenameFromPath(filePath) {
+  const parts = filePath.split(/[/\\]/);
+  return parts[parts.length - 1] || "file";
+}
+function isUrl(str) {
+  return str.startsWith("http://") || str.startsWith("https://");
+}
+async function uploadLocalFile(client, tableName, recordId, fieldName, filePath, filename, contentType) {
+  const { base64 } = await readFileAsBase64(filePath);
+  const finalFilename = filename || getFilenameFromPath(filePath);
+  const finalContentType = contentType || getMimeTypeFromExtension(filePath);
+  const apiUrl = client.apiUrl.replace(/\/+$/, "");
+  const encodedBaseId = encodeURIComponent(client.baseId);
+  const encodedRecordId = encodeURIComponent(recordId);
+  const encodedFieldName = encodeURIComponent(fieldName);
+  const uploadUrl = `${apiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
+  const response = await client._request(
+    uploadUrl,
+    "POST",
+    {
+      contentType: finalContentType,
+      file: base64,
+      filename: finalFilename
+    }
+  );
+  return response;
+}
 async function addAttachmentToRecord(args) {
   const { client, tableName, recordId, fieldName, attachment } = args;
+  if (!attachment.url && !attachment.filePath) {
+    throw new Error(
+      "addAttachmentToRecord: Either 'url' or 'filePath' must be provided in the attachment object"
+    );
+  }
+  if (attachment.filePath) {
+    return uploadLocalFile(
+      client,
+      tableName,
+      recordId,
+      fieldName,
+      attachment.filePath,
+      attachment.filename,
+      attachment.type
+    );
+  }
+  if (!attachment.url) {
+    throw new Error("addAttachmentToRecord: 'url' is required when 'filePath' is not provided");
+  }
+  if (!isUrl(attachment.url)) {
+    throw new Error(
+      `addAttachmentToRecord: Invalid URL format. URL must start with 'http://' or 'https://'. Got: ${attachment.url}`
+    );
+  }
   const currentRecord = await client.getRecord(tableName, recordId);
   const existingAttachments = currentRecord.fields[fieldName] ?? [];
   const updatedAttachments = [...existingAttachments, attachment];

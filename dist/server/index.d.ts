@@ -145,6 +145,8 @@ type AirtableClientConfig = {
  * @see AirtableClientConfig
  */
 type AirtableClient = {
+    readonly baseId: string;
+    readonly apiUrl: string;
     listRecords: <TFields extends AirtableFields = AirtableFields>(tableName: string, params?: AirtableListParams) => Promise<AirtableListResponse<TFields>>;
     listPage: <TFields extends AirtableFields = AirtableFields>(tableName: string, params?: AirtableListParams) => Promise<AirtableListResponse<TFields>>;
     getRecord: <TFields extends AirtableFields = AirtableFields>(tableName: string, recordId: string) => Promise<AirtableRecord<TFields>>;
@@ -154,6 +156,11 @@ type AirtableClient = {
         id: string;
         deleted: boolean;
     }>;
+    /**
+     * Makes a custom request to the Airtable API. Used internally for endpoints not covered by standard methods.
+     * @internal
+     */
+    _request: <TResponse = unknown>(url: string, method: "GET" | "POST" | "PATCH" | "DELETE", body?: unknown) => Promise<TResponse>;
 };
 /**
  * @name createAirtableClient
@@ -1283,31 +1290,45 @@ declare function buildListQuery(params?: AirtableListParams): string;
  *
  * @description
  * Type definition representing an attachment object in Airtable attachment fields.
- * Attachments are stored as arrays of objects with url, filename, size, and type properties.
+ * Supports both public URLs and local file paths. For URLs, attachments are stored as arrays
+ * of objects with url, filename, size, and type properties. For local files, the filePath
+ * is used to read and upload the file via Airtable's uploadAttachment endpoint.
  * Used when adding attachments to records via the API.
  *
  * @category Data
  * @since Not specified
  *
- * @param {string} url - Public URL of the attachment file. Must be directly downloadable.
- * @param {string} [filename] - Optional filename for the attachment.
+ * @param {string} [url] - Public URL of the attachment file. Must be directly downloadable. Required if filePath is not provided.
+ * @param {string} [filePath] - Local file path to upload. File will be read from filesystem and uploaded as base64. Required if url is not provided. Only works in Node.js environment.
+ * @param {string} [filename] - Optional filename for the attachment. If not provided and filePath is used, extracted from filePath.
  * @param {number} [size] - Optional file size in bytes.
- * @param {string} [type] - Optional MIME type of the file (e.g., "application/pdf", "image/png").
+ * @param {string} [type] - Optional MIME type of the file (e.g., "application/pdf", "image/png"). If not provided, inferred from file extension.
  *
  * @example
- * // Basic usage
+ * // Basic usage with URL
  * const attachment: AirtableAttachment = {
  *   url: "https://example.com/document.pdf",
  *   filename: "document.pdf",
  *   type: "application/pdf"
  * };
  *
+ * @example
+ * // Usage with local file (Node.js only)
+ * const attachment: AirtableAttachment = {
+ *   filePath: "/path/to/local/document.pdf",
+ *   filename: "document.pdf",
+ *   type: "application/pdf"
+ * };
+ *
  * @remarks
- * The URL must be publicly accessible and directly downloadable. Airtable will download the file from this URL.
+ * Either url or filePath must be provided. The URL must be publicly accessible and directly downloadable.
+ * For local files, Airtable will upload the file via the uploadAttachment endpoint (max 5MB).
  * For PDFs, use type: "application/pdf". For images, use appropriate image MIME types.
+ * If type is not provided and filePath is used, it will be inferred from the file extension.
  */
 type AirtableAttachment = {
-    url: string;
+    url?: string;
+    filePath?: string;
     filename?: string;
     size?: number;
     type?: string;
@@ -1319,18 +1340,21 @@ type AirtableAttachment = {
  *
  * @description
  * Helper function that adds a new attachment to an attachment field in an Airtable record.
- * Retrieves the current record, appends the new attachment to the existing attachments array,
- * and updates the record with the complete attachment list. Preserves all existing attachments.
+ * Supports both public URLs and local file paths. For URLs, retrieves the current record,
+ * appends the new attachment to the existing attachments array, and updates the record.
+ * For local files, uses Airtable's uploadAttachment endpoint to upload the file directly.
+ * Preserves all existing attachments when using URLs. Local file uploads are handled automatically by Airtable.
  * Useful for adding PDFs, images, or other files to attachment fields programmatically.
  *
  * @category API
  * @since Not specified
  *
  * @requirements
- * @requiresRuntime Node.js >= 18 (for fetch API) or browser with fetch support
+ * @requiresRuntime Node.js >= 18 (for fetch API and fs module for local files) or browser with fetch support (URLs only)
  * @requiresPermissions Valid Airtable API token with write access to the table
  * @requiresEnv Not specified
  * @requiresNetwork Internet required - makes HTTP requests to Airtable API
+ * @requiresFilesystem For local file uploads, requires Node.js filesystem access
  *
  * @dependencies
  * @requires ./createClient AirtableClient type
@@ -1349,22 +1373,23 @@ type AirtableAttachment = {
  * @pii May handle PII if attachment URLs or filenames contain sensitive information
  *
  * @compatibility
- * @supported Node.js 18+, modern browsers with fetch API
- * @notSupported Node.js < 18 without fetch polyfill
+ * @supported Node.js 18+ (URLs and local files), modern browsers with fetch API (URLs only)
+ * @notSupported Node.js < 18 without fetch polyfill. Local file uploads not supported in browser environment.
  *
  * @param {Object} args - Arguments object for adding the attachment.
  * @param {AirtableClient} args.client - Airtable client instance with authentication configured.
  * @param {string} args.tableName - Name of the Airtable table containing the record.
  * @param {string} args.recordId - ID of the record to update.
  * @param {string} args.fieldName - Name of the attachment field to update.
- * @param {AirtableAttachment} args.attachment - Attachment object with url and optional metadata.
+ * @param {AirtableAttachment} args.attachment - Attachment object with either url (for public URLs) or filePath (for local files) and optional metadata.
  *
  * @returns {Promise<AirtableRecord<TFields>>} Promise resolving to the updated record with the new attachment added.
  *
  * @throws {AirtableNotFoundError} When the record or table is not found (404)
  * @throws {AirtableAuthError} When authentication fails (401, 403)
- * @throws {AirtableValidationError} When the field is not an attachment field or attachment URL is invalid (422)
+ * @throws {AirtableValidationError} When the field is not an attachment field, attachment URL is invalid, or file size exceeds 5MB (422)
  * @throws {AirtableHttpError} When other API errors occur
+ * @throws {Error} When neither url nor filePath is provided, or when file is not found (local files only)
  *
  * @example
  * // Basic usage - add a PDF to an attachment field
@@ -1381,7 +1406,7 @@ type AirtableAttachment = {
  * });
  *
  * @example
- * // Advanced usage with typed fields
+ * // Advanced usage with typed fields and URL
  * type DocFields = { "PDF File": AirtableAttachment[] };
  * const updated = await addAttachmentToRecord<DocFields>({
  *   client,
@@ -1396,10 +1421,28 @@ type AirtableAttachment = {
  *   }
  * });
  *
+ * @example
+ * // Local file upload (Node.js only)
+ * const updated = await addAttachmentToRecord({
+ *   client,
+ *   tableName: "Documents",
+ *   recordId: "rec123",
+ *   fieldName: "PDF File",
+ *   attachment: {
+ *     filePath: "/path/to/local/document.pdf",
+ *     filename: "document.pdf",
+ *     type: "application/pdf"
+ *   }
+ * });
+ *
  * @remarks
- * The attachment URL must be publicly accessible and directly downloadable. Airtable will download the file from this URL.
+ * For URLs: The attachment URL must be publicly accessible and directly downloadable. Airtable will download the file from this URL.
  * If the field is empty, a new array is created. If the field already contains attachments, the new one is appended.
  * The function makes two API calls: one GET to fetch the current record, and one PATCH to update it with the new attachment.
+ *
+ * For local files: The file is read from the filesystem, converted to base64, and uploaded via Airtable's uploadAttachment endpoint.
+ * The file size must not exceed 5MB. The MIME type is inferred from the file extension if not provided.
+ * Local file uploads work only in Node.js environment (not in browsers).
  *
  * @see AirtableClient
  * @see AirtableAttachment

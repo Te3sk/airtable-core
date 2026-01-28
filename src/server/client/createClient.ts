@@ -165,6 +165,9 @@ export type AirtableClientConfig = {
  * @see AirtableClientConfig
  */
 export type AirtableClient = {
+  readonly baseId: string;
+  readonly apiUrl: string;
+
   listRecords: <TFields extends AirtableFields = AirtableFields>(
     tableName: string,
     params?: AirtableListParams,
@@ -195,6 +198,16 @@ export type AirtableClient = {
     tableName: string,
     recordId: string,
   ) => Promise<{ id: string; deleted: boolean }>;
+
+  /**
+   * Makes a custom request to the Airtable API. Used internally for endpoints not covered by standard methods.
+   * @internal
+   */
+  _request: <TResponse = unknown>(
+    url: string,
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    body?: unknown,
+  ) => Promise<TResponse>;
 };
 
 /**
@@ -309,6 +322,9 @@ export function createAirtableClient(
   }
 
   return {
+    baseId: config.baseId,
+    apiUrl,
+
     listRecords,
     listPage: listRecords,
 
@@ -360,6 +376,19 @@ export function createAirtableClient(
         url,
         method: "DELETE",
         config: reqConfig,
+      });
+    },
+
+    async _request<TResponse = unknown>(
+      url: string,
+      method: "GET" | "POST" | "PATCH" | "DELETE",
+      body?: unknown,
+    ): Promise<TResponse> {
+      return airtableRequest<TResponse>({
+        url,
+        method,
+        config: reqConfig,
+        body,
       });
     },
   };
