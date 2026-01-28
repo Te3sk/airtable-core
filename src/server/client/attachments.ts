@@ -148,21 +148,19 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   filename?: string,
   contentType?: string,
 ): Promise<import("../../core/types/airtable").AirtableRecord<TFields>> {
-  // Read file as Buffer (not base64 string)
-  const buffer = await fs.readFile(filePath);
-  const size = buffer.length;
-
-  if (size > MAX_FILE_SIZE) {
-    throw new Error(
-      `File size (${size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`,
-    );
-  }
-
   // Determine filename
   const finalFilename = filename || getFilenameFromPath(filePath);
 
   // Determine content type
   const finalContentType = contentType || getMimeTypeFromExtension(filePath);
+
+  // Check file size first (read stats without reading entire file)
+  const stats = await fs.stat(filePath);
+  if (stats.size > MAX_FILE_SIZE) {
+    throw new Error(
+      `File size (${stats.size} bytes) exceeds maximum allowed size of ${MAX_FILE_SIZE} bytes (5MB)`,
+    );
+  }
 
   // Build upload URL: POST https://content.airtable.com/v0/{baseId}/{recordId}/{fieldId}/uploadAttachment
   // Note: uploadAttachment endpoint uses content.airtable.com, not api.airtable.com
@@ -175,14 +173,21 @@ async function uploadLocalFile<TFields extends AirtableFields = AirtableFields>(
   const encodedFieldName = encodeURIComponent(fieldName);
   const uploadUrl = `${contentApiUrl}/${encodedBaseId}/${encodedRecordId}/${encodedFieldName}/uploadAttachment`;
 
+  // Read file as Buffer
+  const buffer = await fs.readFile(filePath);
+
   // Create FormData for multipart/form-data upload
   // Note: In Node.js 18+, FormData is available globally
   // The endpoint expects the file as multipart/form-data with field name "file"
   const formData = new FormData();
   
-  // In Node.js, we need to create a Blob from the buffer
-  // FormData.append accepts Blob, File, or string
+  // Create a Blob from the buffer with the correct MIME type
+  // In Node.js, Blob is more reliably supported than File across versions
   const blob = new Blob([buffer], { type: finalContentType });
+  
+  // Append blob to FormData with filename as third parameter
+  // This ensures the filename is properly included in the multipart/form-data encoding
+  // The third parameter is important for Node.js FormData to correctly encode the filename
   formData.append("file", blob, finalFilename);
 
   // Make the upload request with multipart/form-data using the client's multipart method
